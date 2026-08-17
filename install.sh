@@ -1,226 +1,371 @@
 #!/usr/bin/env bash
-
-# ==============================================================================
-#    ██████╗ █████╗ ██████╗  ██████╗ ███████╗████████╗
-#    ██╔══██╗██╔══██╗██╔══██╗██╔═══██╗██╔════╝╚══██╔══╝
-#    ██║  ██║███████║██████╔╝██║   ██║█████╗     ██║
-#    ██║  ██║██╔══██║██╔══██╗██║   ██║██╔══╝     ██║
-#    ██████╔╝██║  ██║██████╔╝╚██████╔╝███████╗   ██║
-#    ╚═════╝ ╚═╝  ╚═╝╚═════╝  ╚═════╝ ╚══════╝   ╚═╝
-#
-#    CAVRIX Panel - Installer
-#    "Powering Your Game Infrastructure"
-#    Version: 1.0.0
-#    License: MIT (see LICENSE and ATTRIBUTION.md)
-# ==============================================================================
-
-set -e
+set -Eeuo pipefail
 
 PANEL_NAME="CAVRIX Panel"
 PANEL_VERSION="1.0.0"
-DEFAULT_PORT=3000
-REPO_URL="https://github.com/cavrix-panel/cavrix-panel.git"
+REPO_URL="https://github.com/ZYNEXCLOUD123/cavrix-panel.git"
+INSTALL_DIR="/opt/cavrix-panel"
+DEFAULT_PORT="3000"
 
-C_RESET='\033[0m'
-C_BOLD='\033[1m'
-C_CYAN='\033[38;5;75m'
-C_GREEN='\033[38;5;48m'
-C_AMBER='\033[38;5;214m'
-C_RED='\033[38;5;196m'
-C_WHITE='\033[38;5;255m'
-C_MUTED='\033[38;5;244m'
+RESET='\033[0m'
+BOLD='\033[1m'
+CYAN='\033[38;5;75m'
+GREEN='\033[38;5;48m'
+AMBER='\033[38;5;214m'
+RED='\033[38;5;196m'
+WHITE='\033[38;5;255m'
+MUTED='\033[38;5;244m'
 
-log_info() { echo -e " ${C_CYAN}[INFO]${C_RESET} $1"; }
-log_success() { echo -e " ${C_GREEN}[OK]${C_RESET} $1"; }
-log_warning() { echo -e " ${C_AMBER}[WARN]${C_RESET} $1"; }
-log_error() { echo -e " ${C_RED}[ERROR]${C_RESET} $1"; }
+info()    { echo -e " ${CYAN}[INFO]${RESET} $*"; }
+success() { echo -e " ${GREEN}[OK]${RESET} $*"; }
+warn()    { echo -e " ${AMBER}[WARN]${RESET} $*"; }
+error()   { echo -e " ${RED}[ERROR]${RESET} $*"; }
 
-print_banner() {
-    clear
-    echo -e "${C_CYAN}${C_BOLD}"
+trap 'error "Installation failed on line $LINENO. No success message will be shown."' ERR
+
+banner() {
+    clear 2>/dev/null || true
+    echo -e "${CYAN}${BOLD}"
     echo "    ██████╗ █████╗ ██████╗  ██████╗ ███████╗████████╗"
     echo "    ██╔══██╗██╔══██╗██╔══██╗██╔═══██╗██╔════╝╚══██╔══╝"
     echo "    ██║  ██║███████║██████╔╝██║   ██║█████╗     ██║"
     echo "    ██║  ██║██╔══██║██╔══██╗██║   ██║██╔══╝     ██║"
     echo "    ██████╔╝██║  ██║██████╔╝╚██████╔╝███████╗   ██║"
     echo "    ╚═════╝ ╚═╝  ╚═╝╚═════╝  ╚═════╝ ╚══════╝   ╚═╝"
-    echo -e "${C_RESET}"
-    echo -e "    ${C_WHITE}${C_BOLD}${PANEL_NAME} v${PANEL_VERSION}${C_RESET}"
-    echo -e "    ${C_MUTED}Powering Your Game Infrastructure${C_RESET}"
-    echo ""
+    echo -e "${RESET}"
+    echo -e "    ${WHITE}${BOLD}${PANEL_NAME} v${PANEL_VERSION}${RESET}"
+    echo -e "    ${MUTED}Powering Your Game Infrastructure${RESET}"
+    echo
 }
 
-check_root() {
-    if [ "$EUID" -ne 0 ]; then
-        log_warning "Running as non-root. Use sudo if package installation fails."
+require_root() {
+    if [[ "$EUID" -ne 0 ]]; then
+        error "Please run the installer with sudo/root."
+        exit 1
     fi
 }
 
-ensure_nodejs() {
-    log_info "Checking Node.js 20+..."
-    local need_install=0
-    if ! command -v node &> /dev/null; then
-        need_install=1
+detect_user() {
+    if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
+        APP_USER="$SUDO_USER"
     else
-        local node_ver
-        node_ver=$(node -v | cut -d'.' -f1 | tr -d 'v')
-        if [ "$node_ver" -lt 20 ]; then need_install=1; fi
+        APP_USER="cavrix"
     fi
-    if [ "$need_install" -eq 1 ]; then
-        log_info "Installing Node.js 22.x..."
-        if command -v apt-get &> /dev/null; then
-            curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-            sudo apt-get install -y nodejs
-        elif command -v yum &> /dev/null; then
-            curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -
-            sudo yum install -y nodejs
+}
+
+install_packages() {
+    info "Installing system dependencies..."
+
+    if command -v apt-get >/dev/null 2>&1; then
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -y
+        apt-get install -y \
+            curl \
+            git \
+            ca-certificates \
+            build-essential \
+            openssl \
+            postgresql \
+            postgresql-contrib
+
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y \
+            curl \
+            git \
+            ca-certificates \
+            gcc-c++ \
+            make \
+            openssl \
+            postgresql-server \
+            postgresql
+
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y \
+            curl \
+            git \
+            ca-certificates \
+            gcc-c++ \
+            make \
+            openssl \
+            postgresql-server \
+            postgresql
+
+    else
+        error "Unsupported Linux distribution."
+        exit 1
+    fi
+
+    success "System dependencies installed."
+}
+
+install_node() {
+    if command -v node >/dev/null 2>&1; then
+        NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
+
+        if (( NODE_MAJOR >= 20 )); then
+            success "Node.js $(node -v) already installed."
+            return
         fi
     fi
-    log_success "Node.js $(node -v) ready."
-}
 
-setup_system_deps() {
-    log_info "Installing system dependencies..."
-    if command -v apt-get &> /dev/null; then
-        sudo apt-get update -y -qq 2>/dev/null || true
-        sudo apt-get install -y -qq curl git build-essential ca-certificates postgresql postgresql-contrib 2>/dev/null || true
-    elif command -v yum &> /dev/null; then
-        sudo yum install -y curl git gcc-c++ make postgresql-server postgresql 2>/dev/null || true
-    fi
-    log_success "System dependencies installed."
-}
+    info "Installing Node.js 22..."
 
-setup_postgresql() {
-    log_info "Setting up PostgreSQL..."
-    if command -v systemctl &> /dev/null; then
-        sudo systemctl enable --now postgresql 2>/dev/null || true
+    if command -v apt-get >/dev/null 2>&1; then
+        curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+        apt-get install -y nodejs
+    elif command -v dnf >/dev/null 2>&1; then
+        curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
+        dnf install -y nodejs
+    elif command -v yum >/dev/null 2>&1; then
+        curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
+        yum install -y nodejs
     fi
 
-    local db_user="cavrix"
-    local db_pass="cavrix_$(openssl rand -hex 8)"
-    local db_name="cavrix"
-
-    sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='${db_user}'" | grep -q 1 || \
-        sudo -u postgres psql -c "CREATE USER ${db_user} WITH PASSWORD '${db_pass}';" 2>/dev/null || true
-
-    sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='${db_name}'" | grep -q 1 || \
-        sudo -u postgres psql -c "CREATE DATABASE ${db_name} OWNER ${db_user};" 2>/dev/null || true
-
-    sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE ${db_name} TO ${db_user};" 2>/dev/null || true
-
-    echo "${db_user}:${db_pass}"
-    log_success "PostgreSQL database configured."
+    node -v
+    npm -v
+    success "Node.js ready."
 }
 
-setup_docker() {
-    log_info "Checking Docker..."
-    if ! command -v docker &> /dev/null; then
-        log_info "Installing Docker..."
-        curl -fsSL https://get.docker.com | sudo sh
-        sudo systemctl enable --now docker 2>/dev/null || true
-        sudo usermod -aG docker "$USER" 2>/dev/null || true
+install_docker() {
+    if command -v docker >/dev/null 2>&1; then
+        success "Docker already installed."
+        systemctl enable --now docker 2>/dev/null || true
+        return
     fi
-    log_success "Docker ready."
+
+    info "Installing Docker..."
+
+    curl -fsSL https://get.docker.com | sh
+
+    systemctl enable --now docker
+
+    success "Docker installed."
 }
 
-install_panel() {
-    local target_dir="${1:-/opt/cavrix-panel}"
+setup_postgres() {
+    info "Starting PostgreSQL..."
 
-    log_info "Installing CAVRIX Panel to ${target_dir}..."
-    sudo mkdir -p "$target_dir"
-    sudo cp -r ./* "$target_dir/"
-    sudo chown -R "$USER:$USER" "$target_dir"
+    systemctl enable --now postgresql
 
-    cd "$target_dir"
+    DB_USER="cavrix"
+    DB_NAME="cavrix"
 
-    log_info "Installing dependencies..."
-    npm install --no-audit --no-fund --quiet 2>/dev/null || npm install --no-audit --no-fund
+    DB_PASSWORD="$(openssl rand -hex 24)"
 
-    log_info "Building frontend..."
-    cd frontend && npm install --no-audit --no-fund 2>/dev/null || true
-    npm run build 2>/dev/null || true
-    cd ..
+    info "Creating CAVRIX database..."
 
-    log_info "Building backend..."
-    cd backend && npm install --no-audit --no-fund 2>/dev/null || true
-    npm run build 2>/dev/null || true
-    cd ..
+    sudo -u postgres psql -v ON_ERROR_STOP=1 <<SQL
+DO \$\$
+BEGIN
+    IF NOT EXISTS (
+        SELECT FROM pg_roles WHERE rolname = '${DB_USER}'
+    ) THEN
+        CREATE ROLE ${DB_USER} LOGIN PASSWORD '${DB_PASSWORD}';
+    ELSE
+        ALTER ROLE ${DB_USER} WITH PASSWORD '${DB_PASSWORD}';
+    END IF;
+END
+\$\$;
+SQL
 
-    log_success "Application built."
+    if ! sudo -u postgres psql -tAc \
+        "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1; then
+
+        sudo -u postgres createdb \
+            -O "$DB_USER" \
+            "$DB_NAME"
+    fi
+
+    sudo -u postgres psql -v ON_ERROR_STOP=1 -c \
+        "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};"
+
+    success "PostgreSQL configured."
 }
 
-configure_env() {
-    local target_dir="${1:-/opt/cavrix-panel}"
-    local port="${2:-$DEFAULT_PORT}"
+download_cavrix() {
+    TEMP_DIR="$(mktemp -d)"
 
-    local jwt_secret
-    jwt_secret=$(openssl rand -hex 32 2>/dev/null || node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+    info "Downloading CAVRIX from GitHub..."
 
-    cat > "${target_dir}/.env" <<EOF
+    git clone --depth 1 "$REPO_URL" "$TEMP_DIR/cavrix-panel"
+
+    rm -rf "$INSTALL_DIR"
+
+    mkdir -p "$INSTALL_DIR"
+
+    cp -a "$TEMP_DIR/cavrix-panel/." "$INSTALL_DIR/"
+
+    rm -rf "$TEMP_DIR"
+
+    success "CAVRIX source downloaded."
+}
+
+configure_environment() {
+    info "Creating production environment..."
+
+    JWT_SECRET="$(openssl rand -hex 64)"
+
+    cat > "$INSTALL_DIR/.env" <<EOF
 NODE_ENV=production
-PORT=${port}
+PORT=${PORT}
 HOST=0.0.0.0
-DB_HOST=localhost
+
+DB_HOST=127.0.0.1
 DB_PORT=5432
-DB_NAME=cavrix
-DB_USER=cavrix
-DB_PASSWORD=cavrix_placeholder
-JWT_SECRET=${jwt_secret}
+DB_NAME=${DB_NAME}
+DB_USER=${DB_USER}
+DB_PASSWORD=${DB_PASSWORD}
+
+JWT_SECRET=${JWT_SECRET}
 JWT_EXPIRES_IN=7d
+
 ENABLE_DOCKER=true
 DOCKER_SOCKET=/var/run/docker.sock
+
 PANEL_NAME=CAVRIX
-PANEL_VERSION=1.0.0
+PANEL_VERSION=${PANEL_VERSION}
 EOF
 
-    log_success "Environment configured on port ${port}."
+    chmod 600 "$INSTALL_DIR/.env"
+
+    success "Environment configured."
 }
 
-configure_pm2() {
-    local target_dir="${1:-/opt/cavrix-panel}"
-    local port="${2:-$DEFAULT_PORT}"
+install_dependencies() {
+    cd "$INSTALL_DIR"
 
-    if ! command -v pm2 &> /dev/null; then
-        sudo npm install -g pm2 2>/dev/null || npm install -g pm2 2>/dev/null
+    info "Installing root dependencies..."
+    npm ci --no-audit --no-fund
+
+    info "Installing frontend dependencies..."
+    npm ci --prefix frontend --no-audit --no-fund
+
+    info "Installing backend dependencies..."
+    npm ci --prefix backend --no-audit --no-fund
+
+    success "Dependencies installed."
+}
+
+build_application() {
+    cd "$INSTALL_DIR"
+
+    info "Building CAVRIX..."
+
+    npm run build
+
+    test -f "$INSTALL_DIR/backend/dist/index.js"
+
+    success "CAVRIX build completed."
+}
+
+run_database_setup() {
+    cd "$INSTALL_DIR"
+
+    info "Running database migrations..."
+
+    npm run migrate
+
+    info "Creating default database seed..."
+
+    npm run db:seed
+
+    success "Database initialized."
+}
+
+create_service() {
+    info "Creating CAVRIX system service..."
+
+    if ! id "$APP_USER" >/dev/null 2>&1; then
+        useradd --system \
+            --create-home \
+            --shell /usr/sbin/nologin \
+            "$APP_USER"
     fi
 
-    pm2 delete cavrix-panel 2>/dev/null || true
-    cd "$target_dir"
-    PORT="${port}" pm2 start backend/dist/index.js --name cavrix-panel
-    pm2 save 2>/dev/null || true
+    chown -R "$APP_USER:$APP_USER" "$INSTALL_DIR"
 
-    if [ "$EUID" -eq 0 ]; then
-        pm2 startup systemd -u root --hp /root 2>/dev/null || true
+    cat > /etc/systemd/system/cavrix-panel.service <<EOF
+[Unit]
+Description=CAVRIX Panel
+After=network.target postgresql.service docker.service
+Wants=postgresql.service docker.service
+
+[Service]
+Type=simple
+User=${APP_USER}
+WorkingDirectory=${INSTALL_DIR}
+EnvironmentFile=${INSTALL_DIR}/.env
+ExecStart=/usr/bin/node ${INSTALL_DIR}/backend/dist/index.js
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable cavrix-panel
+    systemctl restart cavrix-panel
+
+    sleep 3
+
+    if ! systemctl is-active --quiet cavrix-panel; then
+        systemctl status cavrix-panel --no-pager || true
+        error "CAVRIX service failed to start."
+        exit 1
     fi
 
-    log_success "PM2 service 'cavrix-panel' started."
+    success "CAVRIX service is running."
+}
+
+get_ip() {
+    SERVER_IP="$(curl -4 -fsS --max-time 5 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
 }
 
 main() {
-    print_banner
+    banner
+    require_root
 
-    local port=$DEFAULT_PORT
-    local install_dir="/opt/cavrix-panel"
+    PORT="$DEFAULT_PORT"
 
-    read -r -p "  Installation directory [${install_dir}]: " input_dir
-    install_dir="${input_dir:-$install_dir}"
+    read -r -p "  Installation directory [${INSTALL_DIR}]: " INPUT_DIR
+    INSTALL_DIR="${INPUT_DIR:-$INSTALL_DIR}"
 
-    read -r -p "  Panel port [${port}]: " input_port
-    port="${input_port:-$port}"
+    read -r -p "  Panel port [${PORT}]: " INPUT_PORT
+    PORT="${INPUT_PORT:-$PORT}"
 
-    check_root
-    setup_system_deps
-    ensure_nodejs
-    setup_docker
-    install_panel "$install_dir"
-    configure_env "$install_dir" "$port"
-    configure_pm2 "$install_dir" "$port"
+    if ! [[ "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
+        error "Invalid port."
+        exit 1
+    fi
 
-    echo ""
-    echo -e "${C_GREEN}${C_BOLD}  CAVRIX Panel installed successfully!${C_RESET}"
-    echo -e "  Panel URL: ${C_CYAN}http://$(curl -s --max-time 4 https://api.ipify.org 2>/dev/null || echo 'localhost'):${port}${C_RESET}"
-    echo -e "  Default login: ${C_WHITE}admin@cavrix.panel${C_RESET} / ${C_WHITE}admin123${C_RESET}"
-    echo ""
+    detect_user
+    install_packages
+    install_node
+    install_docker
+    setup_postgres
+    download_cavrix
+    configure_environment
+    install_dependencies
+    build_application
+    run_database_setup
+    create_service
+    get_ip
+
+    echo
+    echo -e "${GREEN}${BOLD}  CAVRIX Panel installed successfully!${RESET}"
+    echo
+    echo -e "  Panel URL: ${CYAN}http://${SERVER_IP}:${PORT}${RESET}"
+    echo -e "  Install directory: ${INSTALL_DIR}"
+    echo -e "  Service: ${CYAN}systemctl status cavrix-panel${RESET}"
+    echo
+    echo -e "${AMBER}  IMPORTANT: Do not use a hard-coded default password in production.${RESET}"
+    echo
 }
 
 main "$@"
