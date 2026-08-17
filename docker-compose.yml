@@ -1,0 +1,76 @@
+version: "3.8"
+
+services:
+  panel:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: cavrix-panel
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=cavrix
+      - DB_USER=cavrix
+      - DB_PASSWORD=${DB_PASSWORD:-cavrix_secure_password}
+      - JWT_SECRET=${JWT_SECRET:-change_this_in_production}
+      - REDIS_URL=redis://redis:6379
+      - DOCKER_SOCKET=/var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - panel_data:/app/data
+      - panel_backups:/app/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - cavrix-network
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: cavrix-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cavrix
+      POSTGRES_USER: cavrix
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-cavrix_secure_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cavrix -d cavrix"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cavrix-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: cavrix-redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cavrix-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  panel_data:
+  panel_backups:
+
+networks:
+  cavrix-network:
+    driver: bridge
